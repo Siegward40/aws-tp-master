@@ -1,0 +1,5 @@
+flask
+pymysql
+sqlalchemy
+boto3
+python-dotenv
