@@ -1,22 +1,35 @@
-from flask import Flask, request, jsonify
-from sqlalchemy import create_engine, Column, Integer, String, Text
+from flask import Flask, request, jsonify, render_template
+from sqlalchemy import create_engine, Column, Integer, String, Text, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import ProgrammingError
 import os
 import boto3
-import pymysql
 
 app = Flask(__name__)
 
-# --- DB CONFIG (via variables d'environnement) ---
+# ------------------------
+#       DB CONFIG
+# ------------------------
 DB_USER = os.environ.get('DB_USER', 'appadmin')
-DB_PASS = os.environ.get('DB_PASS', '')
-DB_HOST = os.environ.get('DB_HOST', 'localhost')
-DB_NAME = os.environ.get('DB_NAME', 'appdb')
+DB_PASS = os.environ.get('DB_PASS', 'labpassword123')
+DB_HOST = os.environ.get(
+    'DB_HOST',
+    'terraform-20251210145159647600000002.cvlsalfbvcow.us-east-1.rds.amazonaws.com'
+)
+DB_NAME = os.environ.get('DB_NAME', 'app_db')
+
+engine = create_engine(f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}/")
+
+with engine.connect() as conn:
+    try:
+        conn.execute(text(f"CREATE DATABASE IF NOT EXISTS {DB_NAME}"))
+    except ProgrammingError:
+        pass
 
 SQLALCHEMY_DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}/{DB_NAME}"
-
 engine = create_engine(SQLALCHEMY_DATABASE_URL, pool_recycle=280)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -24,7 +37,7 @@ Base = declarative_base()
 #       MODEL
 # ------------------------
 class Task(Base):
-    __tablename__ = 'tasks'
+    __tablename__ = "tasks"
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(200))
     description = Column(Text)
@@ -32,37 +45,41 @@ class Task(Base):
 Base.metadata.create_all(bind=engine)
 
 # ------------------------
-#         S3
+#       S3
 # ------------------------
 s3 = boto3.client("s3")
 BUCKET = os.environ.get("S3_BUCKET")
 
 # ------------------------
-#         ROUTES
+#       FRONT
 # ------------------------
-
 @app.route("/")
-def root():
-    return jsonify({"status": "ok", "service": "task-manager"})
+def index():
+    return render_template("index.html")
 
-# --- CRUD TASKS ---
+# ------------------------
+#       API
+# ------------------------
 @app.route("/tasks", methods=["GET", "POST"])
 def tasks():
     db = SessionLocal()
+
     if request.method == "POST":
         data = request.json
-        new_task = Task(title=data.get("title"), description=data.get("description"))
-        db.add(new_task)
+        task = Task(
+            title=data.get("title"),
+            description=data.get("description")
+        )
+        db.add(task)
         db.commit()
-        db.refresh(new_task)
-        return jsonify({"id": new_task.id}), 201
+        db.refresh(task)
+        return jsonify({"id": task.id}), 201
 
     items = db.query(Task).all()
     return jsonify([
         {"id": t.id, "title": t.title, "description": t.description}
         for t in items
     ])
-
 
 @app.route("/tasks/<int:task_id>", methods=["GET", "PUT", "DELETE"])
 def task_item(task_id):
@@ -73,7 +90,11 @@ def task_item(task_id):
         return jsonify({"error": "Task not found"}), 404
 
     if request.method == "GET":
-        return jsonify({"id": task.id, "title": task.title, "description": task.description})
+        return jsonify({
+            "id": task.id,
+            "title": task.title,
+            "description": task.description
+        })
 
     if request.method == "PUT":
         data = request.json
@@ -87,8 +108,6 @@ def task_item(task_id):
         db.commit()
         return jsonify({"status": "deleted"})
 
-
-# --- PRESIGNED UPLOAD URL ---
 @app.route("/upload-url", methods=["POST"])
 def upload_url():
     key = request.json.get("key")
@@ -102,8 +121,6 @@ def upload_url():
     )
     return jsonify({"upload_url": url})
 
-
-# --- PRESIGNED DOWNLOAD URL ---
 @app.route("/download-url", methods=["POST"])
 def download_url():
     key = request.json.get("key")
@@ -116,7 +133,6 @@ def download_url():
         ExpiresIn=3600
     )
     return jsonify({"download_url": url})
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=80)

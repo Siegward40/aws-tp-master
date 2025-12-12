@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Task Manager</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #333; }
+        .task { border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; }
+        input, textarea { width: 100%; margin-bottom: 5px; padding: 5px; }
+        button { padding: 5px 10px; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Task Manager</h1>
+
+    <h2>Create Task</h2>
+    <input type="text" id="title" placeholder="Title">
+    <textarea id="description" placeholder="Description"></textarea>
+    <button onclick="createTask()">Create Task</button>
+
+    <h2>Tasks</h2>
+    <div id="tasks"></div>
+
+    <h2>File Upload to S3</h2>
+    <input type="file" id="fileInput">
+    <button onclick="uploadFile()">Upload</button>
+
+    <h2>File Download from S3</h2>
+    <input type="text" id="downloadKey" placeholder="File key">
+    <button onclick="downloadFile()">Get Download URL</button>
+
+    <script>
+        const API_BASE = "http://54.209.4.198"; // Met à jour si différent, ex: http://localhost:80
+
+        async function fetchTasks() {
+            const res = await fetch(`${API_BASE}/tasks`);
+            const tasks = await res.json();
+            const container = document.getElementById("tasks");
+            container.innerHTML = "";
+            tasks.forEach(t => {
+                const div = document.createElement("div");
+                div.className = "task";
+                div.innerHTML = `
+                    <strong>${t.title}</strong>
+                    <p>${t.description}</p>
+                    <button onclick="editTask(${t.id})">Edit</button>
+                    <button onclick="deleteTask(${t.id})">Delete</button>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        async function createTask() {
+            const title = document.getElementById("title").value;
+            const description = document.getElementById("description").value;
+            await fetch(`${API_BASE}/tasks`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title, description })
+            });
+            document.getElementById("title").value = "";
+            document.getElementById("description").value = "";
+            fetchTasks();
+        }
+
+        async function editTask(id) {
+            const title = prompt("New title:");
+            const description = prompt("New description:");
+            if (!title && !description) return;
+            await fetch(`${API_BASE}/tasks/${id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title, description })
+            });
+            fetchTasks();
+        }
+
+        async function deleteTask(id) {
+            if (!confirm("Delete this task?")) return;
+            await fetch(`${API_BASE}/tasks/${id}`, { method: "DELETE" });
+            fetchTasks();
+        }
+
+        async function uploadFile() {
+            const fileInput = document.getElementById("fileInput");
+            if (!fileInput.files.length) return alert("Select a file!");
+            const file = fileInput.files[0];
+
+            // 1. Demande URL présignée
+            const key = file.name;
+            const res = await fetch(`${API_BASE}/upload-url`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key })
+            });
+            const data = await res.json();
+
+            // 2. Upload du fichier sur S3
+            await fetch(data.upload_url, {
+                method: "PUT",
+                body: file
+            });
+            alert("File uploaded!");
+        }
+
+        async function downloadFile() {
+            const key = document.getElementById("downloadKey").value;
+            if (!key) return alert("Enter file key!");
+
+            const res = await fetch(`${API_BASE}/download-url`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key })
+            });
+            const data = await res.json();
+            window.open(data.download_url, "_blank");
+        }
+
+        fetchTasks();
+    </script>
+</body>
+</html>

@@ -3,4 +3,5 @@ pymysql
 sqlalchemy
 boto3
 python-dotenv
+flask-cors
 gunicorn
